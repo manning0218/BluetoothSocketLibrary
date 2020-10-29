@@ -1,113 +1,102 @@
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <csignal>
+#include <vector>
 
 #include <unistd.h>
 #include <sys/socket.h>
 
 #include "SDPService.hpp"
+#include "BTSocket.hpp"
 
-int init_server() {
+#define MAX_READ 1024*1024
+
+std::unique_ptr<BTSocket> init_server(std::unique_ptr<BTSocket>& socket) {
     std::string service_name {"Manning BT Server"};
     std::string service_desc {"Bluetooth server for the raspberry pi in order to communicate with Android app"};
     std::string service_prov {"Manning Technologies"};
 
     SDPService sdpService;
 
-    int result, sock, client;
-    uint8_t port {11};
-    struct sockaddr_rc loc_addr {0}, rem_addr {0};
-    socklen_t opt = sizeof(rem_addr);
-
     char buffer[1024] = {0};
-
-    // local bluetooth adapter
-    loc_addr.rc_family = AF_BLUETOOTH;
-    loc_addr.rc_bdaddr = SDPService::bdAny;
-    loc_addr.rc_channel = port;
 
     // register service
     auto session = sdpService.initializeService(service_name, service_desc, service_prov);
-    if(sdpService.registerService(session, port)) {
+    if(sdpService.registerService(session, 11)) {
         std::cout << __FILE__ << ":" << __LINE__
             << " INFO: Successfully registered service.\n";
+        socket->create();
+        socket->bind(11);
+        socket->listen();
+        auto client = socket->accept();
+        if(client) {
+            auto addr = client->getSockAddr();
+            ba2str(&addr->rc_bdaddr, buffer);
+            std::cout << __FILE__ << ":" << __LINE__ 
+                << " INFO: Accepted connection from client["
+                << client->getSockFd() << "," << buffer
+                << "]\n";
+            return client;
+        }
     } else {
         std::cout << __FILE__ << ":" << __LINE__
             << " ERROR: Failed to register service.\n";
         _exit(1);
     }
 
-    // allocate socket
-    sock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
-    std::cout << "socket() returned: " << sock << "\n";
-
-    // bind socket to port 3 
-    result = bind(sock, (struct sockaddr *)(&loc_addr), sizeof(loc_addr));
-    std::cout << "bind() returned: " << result << "\n";
-
-    // start listening for connections
-    result = listen(sock, 1);
-    std::cout << "listen() returned: " << result << "\n";
-
-    // accept the connection
-    client = accept(sock, (struct sockaddr *)(&rem_addr), &opt);
-    std::cout << "accept() returned: " << client << "\n";
-
-    ba2str(&rem_addr.rc_bdaddr, buffer);
-    std::cout << "Accepted connection from " << buffer << "\n";
-    memset(buffer, 0, sizeof(buffer));
-
-    return client;
+    return nullptr;
 }
 
-bool read_server(int client) {
-    char input[1024] = {'\0'};
-    int bytes_read = read(client, input, sizeof(input));
+void printData(std::vector<unsigned char>& buffer) {
+    std::string output;
+    std::transform(buffer.begin(), buffer.end(), std::back_inserter(output),
+            [](unsigned char c) { return char(c); });
 
-    if(bytes_read > 0) {
-        std::cout << "Received: " << input << "\n";
-        return true;
-    } else {
-        return false;
-    }
-} 
-
-bool write_server(int client) {
-    char message[1024] = "";
-    std::cout << "Enter message to send: ";
-    std::cin >> message;
-    
-    std::string messageStr(message);
-    std::cout << "Message to send: " << messageStr << "\n";
-    int bytes_sent {0};
-    size_t size {sizeof(message)/sizeof(char)};
-    std::cout << "Message size: " << size << "\n";
-    int remaining {size};
-
-    
-    while(remaining > 0) {
-        std::cout << "Sending at offset: " << size - remaining << "\n";
-        bytes_sent = send(client, &message[size - remaining], size, 0);
-        if(bytes_sent >= 0) {
-            std::cout << "Bytes Sent: " << bytes_sent << "\n";
-            remaining -= bytes_sent;
-            std::cout << "Remaining to send: " << remaining << "\n";
-        } else {
-            return false;
-        }
-    }
-
-    bytes_sent = send(client, "\n", 1, 0);
-
-    return true;
+    std::cout << __FILE__ << ":" << __LINE__
+        << " INFO: Data received from client. buffer: "
+        << output << "\n";
 }
 
 int main() {
-    int client_fd = init_server();
+    std::unique_ptr<BTSocket> server = std::make_unique<BTSocket>();
+    auto client = init_server(server);
+    std::vector<unsigned char> readBuffer(MAX_READ);
+    std::vector<unsigned char> writeBuffer(500);
 
-    while(true) {
-        if(!read_server(client_fd)) break;
-        if(!write_server(client_fd)) break;
+    std::string message {"I love you\r\n"};
+    std::transform(message.begin(), message.end(), std::back_inserter(writeBuffer),
+            [](char c) { return (unsigned char)(c); });
+
+    if(client) {
+        while(true) {
+            int bytesAvailable = client->receive(readBuffer, MAX_READ, MSG_PEEK);
+            if(bytesAvailable > 0) {
+                auto bytesRead = client->receive(readBuffer, bytesAvailable);
+                if(bytesRead > 0) {
+                    printData(readBuffer);
+                } 
+
+                auto bytesWritten = client->send(writeBuffer);
+                if(bytesWritten == int(writeBuffer.size())) {
+                    std::cout << __FILE__ << ":" << __LINE__
+                        << " TRACE: Successfully wrote message to client.\n";
+                }
+
+                if(client->disconnect()) {
+                    std::cout << __FILE__ << ":" << __LINE__
+                        << " INFO: Disconnected client from server. socket["
+                        << client->getSockFd() << "]\n";
+                }
+            } else {
+                std::cout << __FILE__ << ":" << __LINE__
+                    << " ERROR: Could not receive data off socket\n";
+                break;
+            }
+        }
+    } else {
+        std::cout << __FILE__ << ":" << __LINE__
+            << " ERROR: Failure in server initialization occurred.\n";
     }
 
     return 0;
