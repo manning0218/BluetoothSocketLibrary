@@ -13,7 +13,7 @@
 class BTSocket {
     public:
         BTSocket() = default;
-        BTSocket(int fd, struct sockaddr_rc* addr);
+        BTSocket(int fd, struct sockaddr_rc* addr, socklen_t* addrLen);
         ~BTSocket() = default;
 
         // TODO: Add support for both move and copy operations
@@ -29,13 +29,20 @@ class BTSocket {
         int create(int sockFamily = AF_BLUETOOTH, int sockType = SOCK_STREAM, int protocol = BTPROTO_RFCOMM);
         int bind(int port);
         int listen(int backlog = MAX_CONN_QUEUE);
-        std::unique_ptr<BTSocket> accept(); // Used for servers
+        std::shared_ptr<BTSocket> accept(); // Used for servers
 
         // Optional socket configuration
-        int setnonblock();
+        bool setnonblock();
 
         // Send and receive data on connected socket
-        int receive(std::vector<unsigned char>& buffer, int len, int flags = 0);
+        int receive(std::vector<char>& buffer, int len, int flags = 0);
+        int receive() {
+            char buf[1024] {{'\0'}};
+            int bytesRead = recv(sockFd_, buf, 1024, MSG_PEEK);
+            std::cout << __FILE__ << ":" << __LINE__
+                << " TRACE: received: " << bytesRead << "\n";
+            return bytesRead;
+        }
         int send(const std::vector<unsigned char>& buffer, int flags = 0);
 
         // Disconnect calls

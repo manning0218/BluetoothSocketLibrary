@@ -6,10 +6,10 @@
 #include "BTSocket.hpp"
 #include "SDPService.hpp"
 
-BTSocket::BTSocket(int fd, struct sockaddr_rc* addr) :
+BTSocket::BTSocket(int fd, struct sockaddr_rc* addr, socklen_t* addrLen) :
     sockFd_ {fd},
     addr_ {*addr},
-    addrLen_ {sizeof(addr)}
+    addrLen_ {*addrLen}
 {}
 
 int BTSocket::create(int sockFamily, int sockType, int protocol) {
@@ -42,6 +42,9 @@ int BTSocket::bind(int port) {
 }
 
 int BTSocket::listen(int backlog) {
+    std::cout << __FILE__ << ":" << __LINE__ 
+        << " TRACE: Listening for new connections. server["
+        << sockFd_ << "]\n";
     int result = ::listen(sockFd_, backlog);
     errNo_ = errno;
     if(result != 0) {
@@ -53,8 +56,8 @@ int BTSocket::listen(int backlog) {
     return result;
 }
 
-std::unique_ptr<BTSocket> BTSocket::accept() {
-    std::unique_ptr<BTSocket> clientSocket {nullptr};
+std::shared_ptr<BTSocket> BTSocket::accept() {
+    std::shared_ptr<BTSocket> clientSocket {nullptr};
     struct sockaddr_rc peerAddr {0};
     socklen_t opt = sizeof(peerAddr);
     int clientFd = ::accept(sockFd_, (struct sockaddr *)(&peerAddr), &opt);
@@ -65,25 +68,37 @@ std::unique_ptr<BTSocket> BTSocket::accept() {
             << " ERROR: Failed to accept client connection on socket["
             << sockFd_ << "]\n";
     } else {
-        clientSocket = std::make_unique<BTSocket>(clientFd, &peerAddr);
+        clientSocket = std::make_shared<BTSocket>(clientFd, &peerAddr, &opt);
     }
 
     return clientSocket;
 }
 
-int BTSocket::setnonblock() {
-    int result = fcntl(sockFd_, F_SETFD, O_NONBLOCK);
+bool BTSocket::setnonblock() {
+    bool sockIsNonblocking {false};
+
+    int flags = fcntl(sockFd_, F_GETFL, 0);
     errNo_ = errno;
-    if(result == -1) {
+    if(flags == -1) {
         std::cout << __FILE__ << ":" << __LINE__
-            << " ERROR: Failed to set socket[" << sockFd_ 
-            << "] in nonblocking mode.\n";
+            << " ERROR: Faield to get current lock on socket["
+            << sockFd_ << "]\n";
+    } else {
+        int result = fcntl(sockFd_, F_SETFL, O_NONBLOCK);
+        errNo_ = errno;
+        if(result == -1) {
+            std::cout << __FILE__ << ":" << __LINE__
+                << " ERROR: Failed to set socket[" << sockFd_ 
+                << "] in nonblocking mode.\n";
+        }
+
+        sockIsNonblocking = result != -1;
     }
 
-    return result;
+    return sockIsNonblocking;
 }
 
-int BTSocket::receive(std::vector<unsigned char>& buffer, int len, int flags) {
+int BTSocket::receive(std::vector<char>& buffer, int len, int flags) {
     int bytesRead {-1};
     if(len > 0) {
         bytesRead = recv(sockFd_, buffer.data(), len, flags);
