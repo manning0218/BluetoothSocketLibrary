@@ -3,9 +3,8 @@
 #include <string>
 #include <csignal>
 #include <vector>
-#include <thread>
-#include <atomic>
 #include <functional>
+#include <memory>
 
 #include <string.h>
 
@@ -15,10 +14,12 @@
 #include "SDPService.hpp"
 #include "BTSocket.hpp"
 #include "EventManager.hpp"
+#include "RaspberryPiControl.hpp"
 
 #define MAX_READ 1024*1024
 
 std::unordered_map<int, std::shared_ptr<BTSocket>> clients;
+auto raspPi = std::make_unique<RaspberryPiControl>();
 
 bool init_server(std::shared_ptr<BTSocket>& socket) {
     std::string service_name {"Manning BT Server"};
@@ -52,11 +53,34 @@ bool init_server(std::shared_ptr<BTSocket>& socket) {
 void printData(std::vector<char>& buffer) {
     std::string output;
     std::transform(buffer.begin(), buffer.end(), std::back_inserter(output),
-            [](char c) { return char(c); });
+            [](char c) { 
+                if(c == '\n' || c == '\r') {
+                    return ' ';
+                } else {
+                    return char(c);
+                }
+            });
 
     std::cout << __FILE__ << ":" << __LINE__
         << " INFO: Data received from client. buffer: "
         << output << "\n";
+}
+
+Command getCommand(const std::vector<char>& buffer) {
+    std::string data;
+    std::transform(buffer.begin(), buffer.end(), std::back_inserter(data),
+            [](char c) { return char(c); });
+
+    try {
+        int command = std::stoi(data);
+        return raspPi->getCommand(command);
+    } catch(std::exception& ex) {
+        std::cout << __FILE__ << ":" << __LINE__
+            << " ERROR: Failed to get command. error: "
+            << ex.what() << "\n";
+    }
+
+    return Command::NO_CMD;
 }
 
 void readClient(std::shared_ptr<BTSocket> client) {
@@ -76,9 +100,21 @@ void readClient(std::shared_ptr<BTSocket> client) {
                         << " INFO: Deregistered client from event manager. client["
                         << clientFd << "]\n";
                     clients.erase(clientFd);
+                    raspPi->setConnectionState(false);
                 }
             } else {
                 printData(buffer);
+                auto command = getCommand(buffer);
+                if(raspPi->executeCommand(command)) {
+                    std::cout << __FILE__ << ":" << __LINE__
+                        << " INFO: Successfully executed command. command["
+                        << raspPi->getCurrentCommand() << "]\n";
+                } else {
+                    std::cout << __FILE__ << ":" << __LINE__
+                        << " ERROR: Failed to execute command. errno["
+                        << raspPi->getErrorNo() << "] reason["
+                        << strerror(raspPi->getErrorNo()) << "]\n";
+                }
             }
         } else {
             std::cout << __FILE__ << ":" << __LINE__
@@ -90,6 +126,7 @@ void readClient(std::shared_ptr<BTSocket> client) {
                     << " INFO: Deregistered client from event manager. client["
                     << clientFd << "]\n";
                 clients.erase(clientFd);
+                raspPi->setConnectionState(false);
             }
         }
     }
@@ -117,12 +154,19 @@ bool addReadHandle(std::shared_ptr<BTSocket> client) {
 void addNewClient(std::shared_ptr<BTSocket> server) {
     if(server) {
         auto client = server->accept();
-        clients.emplace(client->getSockFd(), client);
-        if(!addReadHandle(client)) {
-           std::cout << __FILE__ << ":" << __LINE__
-               << " ERROR: Failed to add client read event. client["
-               << client->getSockFd() << "]\n";
-        } 
+        if(raspPi->setup()) {
+            raspPi->initialize();
+            raspPi->printCommands();
+            raspPi->setConnectionState(true);
+            clients.emplace(client->getSockFd(), client);
+            if(!addReadHandle(client)) {
+               std::cout << __FILE__ << ":" << __LINE__
+                   << " ERROR: Failed to add client read event. client["
+                   << client->getSockFd() << "]\n";
+            } 
+        } else {
+            client->disconnect();
+        }
     } 
 }
 
@@ -160,7 +204,7 @@ void run(std::shared_ptr<BTSocket> server) {
 int main() {
     std::shared_ptr<BTSocket> server = std::make_shared<BTSocket>();
     if(init_server(server)) {
-       run(server); 
+        run(server); 
     } else {
         std::cout << __FILE__ << ":" << __LINE__
             << " ERROR: Failure in server initialization occurred.\n";

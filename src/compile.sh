@@ -12,10 +12,11 @@ if [ $1 == "realease" ]; then
     g++ -O3 -std=c++17 -I ./ -c SDPService.cpp -o build/release/obj/SDPService.o
     g++ -O3 -std=c++17 -I ./ -c BTSocket.cpp -o build/release/obj/BTSocket.o
     g++ -O3 -std=c++17 -I ./ -c EventManager.cpp -o build/release/obj/EventManager.o
+    g++ -O3 -std=c++17 -I ./ -c RaspberryPiControl.cpp -o build/debug/obj/RaspberryPiControl.o
     g++ -O3 -std=c++17 -I ./ -c main.cpp -o build/release/obj/main.o
 
     objs=$(find build/release/obj/*)
-    g++ -O3 -std=c++17 -I ./ $objs -o build/bin/bluetooth_conn_service_release -lbluetooth
+    g++ -O3 -std=c++17 -I ./ $objs -o build/bin/bluetooth_conn_service_release -lbluetooth -lwiringPi -pthread
 elif [ $1 == "debug" ]; then
     if [ ! -d "./build/debug/obj" ]; then
         mkdir -p "./build/debug/obj"
@@ -24,10 +25,11 @@ elif [ $1 == "debug" ]; then
     g++ -g -O0 -std=c++17 -I ./ -c SDPService.cpp -o build/debug/obj/SDPService.o
     g++ -g -O0 -std=c++17 -I ./ -c BTSocket.cpp -o build/debug/obj/BTSocket.o
     g++ -g -O0 -std=c++17 -I ./ -c EventManager.cpp -o build/debug/obj/EventManager.o
+    g++ -g -O0 -std=c++17 -I ./ -c RaspberryPiControl.cpp -o build/debug/obj/RaspberryPiControl.o
     g++ -g -O0 -std=c++17 -I ./ -c main.cpp -o build/debug/obj/main.o
 
     objs=$(find build/debug/obj/*)
-    g++ -g -O0 -std=c++17 -I ./ $objs -o build/bin/bluetooth_conn_service_debug -lbluetooth
+    g++ -g -O0 -std=c++17 -I ./ $objs -o build/bin/bluetooth_conn_service_debug -lbluetooth -lwiringPi -pthread
 elif [ $1 == "clean" ]; then 
     rm -rf ./build/release/obj/
     rm -rf ./build/debug/obj

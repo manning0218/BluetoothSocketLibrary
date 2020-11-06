@@ -37,7 +37,7 @@ class BTSocket {
         // Send and receive data on connected socket
         int receive(std::vector<char>& buffer, int len, int flags = 0);
         int receive() {
-            char buf[1024] {{'\0'}};
+            char buf[1024] = "\0";
             int bytesRead = recv(sockFd_, buf, 1024, MSG_PEEK);
             std::cout << __FILE__ << ":" << __LINE__
                 << " TRACE: received: " << bytesRead << "\n";
